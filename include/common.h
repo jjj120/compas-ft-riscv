@@ -29,6 +29,10 @@ struct ISAConfig {
 
   ISAConfig();
 };
+
+#define RISCV_COMMENT_CHAR std::string(".")
+//("addi x0, x0, 0 # ")
+
 // Reg Types
 enum class RegType { I, FS, FD, FH };
 // ED0: on error-detection, jump to error-block and keep on executing it
@@ -54,25 +58,23 @@ const unsigned kFP{llvm::RISCV::X8};
 RegType getRegType(llvm::Register);
 // save registers in the vector one by one onto the stack and do this
 // at the instruction point pointed to by iterator
-void saveRegs(std::vector<llvm::Register>, llvm::MachineBasicBlock*,
-              llvm::MachineBasicBlock::iterator, llvm::Register sp = kSP);
+void saveRegs(std::vector<llvm::Register>, llvm::MachineBasicBlock *, llvm::MachineBasicBlock::iterator,
+              llvm::Register sp = kSP);
 // load regs to the vector ony by one from the stack and do this
 // at the instruction point pointed to by iterator
-void loadRegs(std::vector<llvm::Register>, llvm::MachineBasicBlock*,
-              llvm::MachineBasicBlock::iterator, llvm::Register sp = kSP);
+void loadRegs(std::vector<llvm::Register>, llvm::MachineBasicBlock *, llvm::MachineBasicBlock::iterator,
+              llvm::Register sp = kSP);
 
-template <class ContainerT, class ValueT>
-bool setmapContains(const ContainerT& c, const ValueT& v) {
+template <class ContainerT, class ValueT> bool setmapContains(const ContainerT &c, const ValueT &v) {
   return (c.find(v) != c.end());
 }
 
-template <class MapT, class ValueT>
-bool mapValContains(const MapT& m, const ValueT& v) {
-  for (const auto& p : m) {
+template <class MapT, class ValueT> bool mapValContains(const MapT &m, const ValueT &v) {
+  for (const auto &p : m) {
     if (p.second == v) {
       return true;
     }
   }
   return false;
 }
-}  // namespace riscv_common
+} // namespace riscv_common

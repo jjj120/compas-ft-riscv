@@ -23,13 +23,13 @@
 #include "common.h"
 
 class RISCVRasm : public RISCVDmr {
- public:
+public:
   // constructor
   RISCVRasm();
   // override the transformation function
   bool runOnMachineFunction(llvm::MachineFunction &) override;
 
- private:
+private:
   // RTS register
   const unsigned kRTS{llvm::RISCV::X5};
   // check register
@@ -50,5 +50,5 @@ class RISCVRasm : public RISCVDmr {
   void harden();
   // inserts an error-handler BB to the machine function so that in case of
   // error detection we end up in this block
-  void insertErrorBB() override;
+  llvm::MachineBasicBlock *insertErrorBB(std::string) override;
 };

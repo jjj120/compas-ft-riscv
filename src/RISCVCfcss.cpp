@@ -28,8 +28,7 @@ bool RISCVCfcss::runOnMachineFunction(llvm::MachineFunction &MF) {
   MF_ = &MF;
   TII_ = MF_->getSubtarget().getInstrInfo();
 
-  if (!riscv_common::inCSString(llvm::cl::enable_cfcss,
-                                std::string{MF_->getName()})) {
+  if (!riscv_common::inCSString(llvm::cl::enable_cfcss, std::string{MF_->getName()})) {
     return false;
   }
 
@@ -57,12 +56,33 @@ void RISCVCfcss::init() {
   mbb_info_.clear();
   cf_err_bb_ = nullptr;
 
-  if (config_.eds == riscv_common::ErrorDetectionStrategy::ED0 ||
-      config_.eds == riscv_common::ErrorDetectionStrategy::ED1) {
+  // ED0: on error-detection, jump to error-block and keep on executing it
+  // ED1: same as ED0 but it quits after notifying safety-unit
+  // ED2: on error-detection, call a function passing the specific checker's code
+  // ED3: on error-detection, jump to error block and immediately stop execution
+  // ED4: on error-detection, send a pc to uart
+  switch (config_.eds) {
+  case riscv_common::ErrorDetectionStrategy::ED0:
     // insert an error-BB in MF_
-    insertErrorBB();
-  } else {
-    assert(0 && "TODO");
+    insertErrorBB(std::string("CFCSS_UNKNOWN_ERR_BB_NAME"));
+    break;
+  case riscv_common::ErrorDetectionStrategy::ED1:
+    // insert an error-BB in MF_
+    insertErrorBB(std::string("CFCSS_UNKNOWN_ERR_BB_NAME"));
+    break;
+  case riscv_common::ErrorDetectionStrategy::ED2:
+    assert(0 && "TODO: ED2 not implemented yet");
+    break;
+  case riscv_common::ErrorDetectionStrategy::ED3:
+    assert(0 && "TODO: ED3 not implemented yet");
+    break;
+  case riscv_common::ErrorDetectionStrategy::ED4:
+    assert(0 && "TODO: ED4 not implemented yet");
+    break;
+
+  default:
+    assert(0 && "Unknown error-detection strategy");
+    break;
   }
 
   // filling up MBBInfo struct for each MBB
@@ -93,8 +113,7 @@ void RISCVCfcss::init() {
   }
 
   // setting G to entry-BB signature at start of MF_
-  llvm::BuildMI(MF_->front(), std::begin(MF_->front()),
-                MF_->front().front().getDebugLoc(),
+  llvm::BuildMI(MF_->front(), std::begin(MF_->front()), MF_->front().front().getDebugLoc(),
                 TII_->get(llvm::RISCV::ADDI))
       .addReg(kG)
       .addReg(riscv_common::k0)
@@ -119,8 +138,7 @@ void RISCVCfcss::harden() {
 
     auto insert{std::begin(MBB)};
     // G = G ^ d_j
-    llvm::BuildMI(MBB, insert, insert->getDebugLoc(),
-                  TII_->get(llvm::RISCV::XORI))
+    llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::XORI))
         .addReg(kG)
         .addReg(kG)
         .addImm(mbb_info_[&MBB].d);
@@ -130,13 +148,13 @@ void RISCVCfcss::harden() {
     //       immediate value hence using kD temporarily for holding immediate
     //       looks to be safe for now but have to work on several programs to
     //       see if this implementation works out
-    llvm::BuildMI(MBB, insert, insert->getDebugLoc(),
-                  TII_->get(llvm::RISCV::ADDI))
+    llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
         .addReg(kD)
         .addReg(riscv_common::k0)
         .addImm(mbb_info_[&MBB].s);
-    llvm::BuildMI(MBB, insert, insert->getDebugLoc(),
-                  TII_->get(llvm::RISCV::BNE))
+
+    insertErrorBB(std::string("CFCSS_UNKNOWN_ERR_BB_NAME")); // create new error-BB for each hardening check
+    llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
         .addReg(kG)
         .addReg(kD)
         .addMBB(cf_err_bb_);
@@ -146,8 +164,7 @@ void RISCVCfcss::harden() {
   for (auto &MBB : *MF_) {
     if (mbb_info_[&MBB].is_fanin) {
       // G = G ^ D at start
-      llvm::BuildMI(MBB, std::next(std::begin(MBB)),
-                    std::begin(MBB)->getDebugLoc(), TII_->get(llvm::RISCV::XOR))
+      llvm::BuildMI(MBB, std::next(std::begin(MBB)), std::begin(MBB)->getDebugLoc(), TII_->get(llvm::RISCV::XOR))
           .addReg(kG)
           .addReg(kG)
           .addReg(kD);
@@ -183,8 +200,7 @@ void RISCVCfcss::harden() {
           // if rather MBB is on the taken path then we have to update insert
           // before the terminator
           for (auto RMI = std::rbegin(*PBB); RMI != std::rend(*PBB); ++RMI) {
-            if (RMI->isBranch() && (RMI->getOperand(0).isReg() &&
-                                    RMI->getOperand(0).getReg() != kG)) {
+            if (RMI->isBranch() && (RMI->getOperand(0).isReg() && RMI->getOperand(0).getReg() != kG)) {
               assert(RMI->getNumOperands() == 3 && RMI->getOperand(2).isMBB());
 
               if (RMI->getOperand(2).getMBB() == &MBB) {
@@ -196,8 +212,7 @@ void RISCVCfcss::harden() {
         }
 
         // updating D on insert via D_i,m = s_i,1 ^ s_i,m
-        llvm::BuildMI(*PBB, insert, PBB->front().getDebugLoc(),
-                      TII_->get(llvm::RISCV::ADDI))
+        llvm::BuildMI(*PBB, insert, PBB->front().getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
             .addReg(kD)
             .addReg(riscv_common::k0)
             .addImm(mbb_info_[&MBB].s_i1 ^ mbb_info_[PBB].s);
@@ -215,8 +230,7 @@ void RISCVCfcss::harden() {
         }
 
         // jumps are also considered as calls so filtering them out
-        if (MI.getOperand(0).isReg() &&
-            MI.getOperand(0).getReg() == llvm::RISCV::X0) {
+        if (MI.getOperand(0).isReg() && MI.getOperand(0).getReg() == llvm::RISCV::X0) {
           continue;
         }
 
@@ -226,8 +240,7 @@ void RISCVCfcss::harden() {
         // NOTE: stack can be used to pass args if they exceed arg regs hence
         //       we shouldn't use stack for CFC signatures
         // for G, we simply move the expected value back into G
-        llvm::BuildMI(MBB, insert, MI.getDebugLoc(),
-                      TII_->get(llvm::RISCV::ADDI))
+        llvm::BuildMI(MBB, insert, MI.getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
             .addReg(kG)
             .addReg(riscv_common::k0)
             .addImm(mbb_info_[&MBB].s);
@@ -240,18 +253,15 @@ void RISCVCfcss::harden() {
           }
 
           if (!check_block_passed) {
-            if (MI2.getOpcode() == llvm::RISCV::BNE &&
-                MI2.getOperand(0).getReg() == kG &&
+            if (MI2.getOpcode() == llvm::RISCV::BNE && MI2.getOperand(0).getReg() == kG &&
                 MI2.getOperand(1).getReg() == kD) {
               check_block_passed = true;
             }
             continue;
           }
 
-          if (MI2.getOperand(0).isReg() && MI2.getOperand(0).getReg() == kD &&
-              MI2.getOpcode() == llvm::RISCV::ADDI &&
-              MI2.getOperand(1).isReg() &&
-              MI2.getOperand(1).getReg() == riscv_common::k0) {
+          if (MI2.getOperand(0).isReg() && MI2.getOperand(0).getReg() == kD && MI2.getOpcode() == llvm::RISCV::ADDI &&
+              MI2.getOperand(1).isReg() && MI2.getOperand(1).getReg() == riscv_common::k0) {
             auto si{MF_->CloneMachineInstr(&MI2)};
             MBB.insertAfter(&MI, si);
             break;
@@ -285,30 +295,40 @@ bool RISCVCfcss::hasMultipleFaninSBB(llvm::MachineBasicBlock *PBB) {
 // for now we just write '1' to special memory address (0xfff8) to tell the
 // simulator that this FI is covered in a separate error-BB. Further we
 // stay in this loop to avoid further functional execution
-void RISCVCfcss::insertErrorBB() {
+llvm::MachineBasicBlock *RISCVCfcss::insertErrorBB(std::string name) {
   cf_err_bb_ = MF_->CreateMachineBasicBlock();
   MF_->push_back(cf_err_bb_);
 
   auto DLL{MF_->front().front().getDebugLoc()};
 
+  if (not RISCV_COMMENT_CHAR.empty()) {
+    llvm::outs() << "COMPAS-CFCSS: Inserting error-BB: " << name << "\n";
+    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::INLINEASM))
+        .addExternalSymbol((RISCV_COMMENT_CHAR + name).c_str())
+        .addImm(0)
+        .addImm(0);
+  }
+
+  // insert breakpoint instruction to stop execution
+  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::EBREAK));
+
+  /*
   // storing '1' to addr : (0xfff8 = 0x10000 - 0x8):
   // lui t1, 16 -> makes t1 = 0x10000
-  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
-                TII_->get(llvm::RISCV::LUI))
+  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::LUI))
       .addReg(llvm::RISCV::X6)
       .addImm(16);
   // addi t2, zero, 1 -> makes t2 = 1
-  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
-                TII_->get(llvm::RISCV::ADDI))
+  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::ADDI))
       .addReg(llvm::RISCV::X7)
       .addReg(riscv_common::k0)
       .addImm(1);
   // sw t2, -8(t1) -> stores t2 to (t1 - 8) i.e. store 1 to 0xfff8
-  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
-                TII_->get(isa_config_.store_opcode))
+  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(isa_config_.store_opcode))
       .addReg(llvm::RISCV::X7)
       .addReg(llvm::RISCV::X6)
       .addImm(-8);
+  */
 
   // to encode the error-BB in order to make it a label so as to be able to
   // jump to it from anywhere in asm
@@ -318,13 +338,13 @@ void RISCVCfcss::insertErrorBB() {
     // keep on repeating this errBB as we dont want to execute code now
     // J cf_err_bb_ = JALR X0, cf_err_bb_ because J is a pseudo-jump instr in
     // RISCV
-    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
-                  TII_->get(llvm::RISCV::JAL))
+    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::JAL))
         .addReg(riscv_common::k0)
         .addMBB(cf_err_bb_);
   } else {
     // quit early using ebreak
-    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
-                  TII_->get(llvm::RISCV::EBREAK));
+    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::EBREAK));
   }
+
+  return cf_err_bb_;
 }

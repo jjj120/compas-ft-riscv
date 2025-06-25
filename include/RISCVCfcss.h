@@ -23,13 +23,13 @@
 #include "common.h"
 
 class RISCVCfcss : public RISCVDmr {
- public:
+public:
   // constructor
   RISCVCfcss();
   // override the transformation function
   bool runOnMachineFunction(llvm::MachineFunction &) override;
 
- private:
+private:
   struct MBBInfo {
     unsigned s{0};
     unsigned d{0};
@@ -53,7 +53,7 @@ class RISCVCfcss : public RISCVDmr {
   void harden();
   // inserts an error-handler BB to the machine function so that in case of
   // error detection we end up in this block
-  void insertErrorBB() override;
+  llvm::MachineBasicBlock *insertErrorBB(std::string) override;
   // utility function to test if a passed in MBB has both succ as fanin-nodes
   bool hasMultipleFaninSBB(llvm::MachineBasicBlock *);
 };

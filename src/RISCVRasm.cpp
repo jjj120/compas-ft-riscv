@@ -29,8 +29,7 @@ bool RISCVRasm::runOnMachineFunction(llvm::MachineFunction &MF) {
   MF_ = &MF;
   TII_ = MF_->getSubtarget().getInstrInfo();
 
-  if (!riscv_common::inCSString(llvm::cl::enable_rasm,
-                                std::string{MF_->getName()})) {
+  if (!riscv_common::inCSString(llvm::cl::enable_rasm, std::string{MF_->getName()})) {
     return false;
   }
 
@@ -50,7 +49,7 @@ void RISCVRasm::init() {
   if (config_.eds == riscv_common::ErrorDetectionStrategy::ED0 ||
       config_.eds == riscv_common::ErrorDetectionStrategy::ED1) {
     // insert an error-BB in MF_
-    insertErrorBB();
+    insertErrorBB(std::string("RASM_UNKNOWN_ERR_BB_NAME"));
   } else {
     assert(0 && "TODO");
   }
@@ -96,8 +95,7 @@ void RISCVRasm::harden() {
 
     if (MBB.pred_empty()) {
       // for entryBB we dont check RTS
-      llvm::BuildMI(MF_->front(), std::begin(MF_->front()),
-                    std::begin(MF_->front())->getDebugLoc(),
+      llvm::BuildMI(MF_->front(), std::begin(MF_->front()), std::begin(MF_->front())->getDebugLoc(),
                     TII_->get(llvm::RISCV::ADDI))
           .addReg(kRTS)
           .addReg(riscv_common::k0)
@@ -105,19 +103,18 @@ void RISCVRasm::harden() {
     } else {
       auto insert{std::begin(MBB)};
       // updating RTS
-      llvm::BuildMI(MBB, insert, insert->getDebugLoc(),
-                    TII_->get(llvm::RISCV::ADDI))
+      llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
           .addReg(kRTS)
           .addReg(kRTS)
           .addImm(-mbb_sigs_[&MBB].second);
       // comparing the RTS with compile-time sig
-      llvm::BuildMI(MBB, insert, insert->getDebugLoc(),
-                    TII_->get(llvm::RISCV::ADDI))
+      llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
           .addReg(kC)
           .addReg(riscv_common::k0)
           .addImm(mbb_sigs_[&MBB].first);
-      llvm::BuildMI(MBB, insert, insert->getDebugLoc(),
-                    TII_->get(llvm::RISCV::BNE))
+
+      insertErrorBB(std::string("RASM_ERR_BB_UNKNOWN"));
+      llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
           .addReg(kRTS)
           .addReg(kC)
           .addMBB(cf_err_bb_);
@@ -142,8 +139,7 @@ void RISCVRasm::harden() {
       // preserving them across function call using the stack
       if (MI.isCall()) {
         // jumps are also considered as calls so filtering them out
-        if (MI.getOperand(0).isReg() &&
-            MI.getOperand(0).getReg() == llvm::RISCV::X0) {
+        if (MI.getOperand(0).isReg() && MI.getOperand(0).getReg() == llvm::RISCV::X0) {
           continue;
         }
         // filtering out tail calls
@@ -158,10 +154,8 @@ void RISCVRasm::harden() {
         //       we shouldn't use stack for CFC signatures
 
         if (MI.getOpcode() == llvm::RISCV::PseudoCALLIndirect ||
-            !(riscv_common::inCSString(llvm::cl::enable_nzdc,
-                                       std::string{MF_->getName()}) &&
-              riscv_common::setmapContains(knownLibcalls2Duplicable_,
-                                           getCalledFuncName(&MI)))) {
+            !(riscv_common::inCSString(llvm::cl::enable_nzdc, std::string{MF_->getName()}) &&
+              riscv_common::setmapContains(knownLibcalls2Duplicable_, getCalledFuncName(&MI)))) {
           // if we are in DMR func and we are going to libcall via this MI call
           // then no need to stack RTS explicitly as this is already done in DMR
           // else: we stack RTS as below
@@ -169,15 +163,12 @@ void RISCVRasm::harden() {
           riscv_common::saveRegs({kRTS}, &MBB, MI.getIterator());
           riscv_common::loadRegs({kRTS}, &MBB, insert);
 
-          if (riscv_common::inCSString(llvm::cl::enable_nzdc,
-                                       std::string{MF_->getName()})) {
-            llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(),
-                          TII_->get(llvm::RISCV::ADDI))
+          if (riscv_common::inCSString(llvm::cl::enable_nzdc, std::string{MF_->getName()})) {
+            llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
                 .addReg(P2S_.at(riscv_common::kSP))
                 .addReg(P2S_.at(riscv_common::kSP))
                 .addImm(-4);
-            llvm::BuildMI(MBB, insert, MI.getDebugLoc(),
-                          TII_->get(llvm::RISCV::ADDI))
+            llvm::BuildMI(MBB, insert, MI.getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
                 .addReg(P2S_.at(riscv_common::kSP))
                 .addReg(P2S_.at(riscv_common::kSP))
                 .addImm(4);
@@ -207,15 +198,12 @@ void RISCVRasm::harden() {
               if (op.isReg() && P2S_.find(op.getReg()) != P2S_.end()) {
                 assert(MBB.succ_size() == 1);
                 auto SBB{*std::begin(MBB.successors())};
-                assert(std::abs(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second -
-                                mbb_sigs_[&MBB].first) < 2045 &&
+                assert(std::abs(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second - mbb_sigs_[&MBB].first) < 2045 &&
                        "large sig generated\n");
-                llvm::BuildMI(MBB, std::end(MBB), MI.getDebugLoc(),
-                              TII_->get(llvm::RISCV::ADDI))
+                llvm::BuildMI(MBB, std::end(MBB), MI.getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
                     .addReg(kRTS)
                     .addReg(kRTS)
-                    .addImm(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second -
-                            mbb_sigs_[&MBB].first);
+                    .addImm(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second - mbb_sigs_[&MBB].first);
                 ignore_this_mi = true;
 
                 break;
@@ -226,15 +214,12 @@ void RISCVRasm::harden() {
           continue;
         }
 
-        assert(std::abs(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second -
-                        mbb_sigs_[&MBB].first) < 2045 &&
+        assert(std::abs(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second - mbb_sigs_[&MBB].first) < 2045 &&
                "large sig generated\n");
-        llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(),
-                      TII_->get(llvm::RISCV::ADDI))
+        llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
             .addReg(kRTS)
             .addReg(kRTS)
-            .addImm(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second -
-                    mbb_sigs_[&MBB].first);
+            .addImm(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second - mbb_sigs_[&MBB].first);
 
         llvm::MachineBasicBlock *other_SBB{nullptr};
         for (auto SBBx : MBB.successors()) {
@@ -244,27 +229,20 @@ void RISCVRasm::harden() {
           }
         }
 
-        assert(std::abs(-(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second -
-                          mbb_sigs_[&MBB].first) +
-                        (mbb_sigs_[other_SBB].first +
-                         mbb_sigs_[other_SBB].second - mbb_sigs_[&MBB].first)) <
-                   2045 &&
+        assert(std::abs(-(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second - mbb_sigs_[&MBB].first) +
+                        (mbb_sigs_[other_SBB].first + mbb_sigs_[other_SBB].second - mbb_sigs_[&MBB].first)) < 2045 &&
                "large sig generated");
-        llvm::BuildMI(MBB, std::next(MI.getIterator()), MI.getDebugLoc(),
-                      TII_->get(llvm::RISCV::ADDI))
+        llvm::BuildMI(MBB, std::next(MI.getIterator()), MI.getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
             .addReg(kRTS)
             .addReg(kRTS)
-            .addImm(-(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second -
-                      mbb_sigs_[&MBB].first) +
-                    (mbb_sigs_[other_SBB].first + mbb_sigs_[other_SBB].second -
-                     mbb_sigs_[&MBB].first));
+            .addImm(-(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second - mbb_sigs_[&MBB].first) +
+                    (mbb_sigs_[other_SBB].first + mbb_sigs_[other_SBB].second - mbb_sigs_[&MBB].first));
         ignore_this_mi = true;
         if (MBB.back().isUnconditionalBranch()) {
           ignore_jump = true;
         } else {
           if (MBB.back().isCall() && MBB.back().getOperand(1).isMBB() &&
-              err_bbs_.find(MBB.back().getOperand(1).getMBB()) !=
-                  err_bbs_.end()) {
+              err_bbs_.find(MBB.back().getOperand(1).getMBB()) != err_bbs_.end()) {
             ignore_jump = true;
           }
         }
@@ -276,15 +254,12 @@ void RISCVRasm::harden() {
           assert(MI.getOperand(0).isMBB());
           auto SBB{MI.getOperand(0).getMBB()};
 
-          assert(std::abs(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second -
-                          mbb_sigs_[&MBB].first) < 2045 &&
+          assert(std::abs(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second - mbb_sigs_[&MBB].first) < 2045 &&
                  "large sig generated\n");
-          llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(),
-                        TII_->get(llvm::RISCV::ADDI))
+          llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
               .addReg(kRTS)
               .addReg(kRTS)
-              .addImm(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second -
-                      mbb_sigs_[&MBB].first);
+              .addImm(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second - mbb_sigs_[&MBB].first);
         }
 
         continue;
@@ -293,18 +268,17 @@ void RISCVRasm::harden() {
       // RASM processing before the return instruction
       if (MI.isReturn()) {
         short rand{unif_dist_(gen_)};
-        llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(),
-                      TII_->get(llvm::RISCV::ADDI))
+        llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
             .addReg(kRTS)
             .addReg(kRTS)
             .addImm(rand - mbb_sigs_[&MBB].first);
-        llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(),
-                      TII_->get(llvm::RISCV::ADDI))
+        llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
             .addReg(kC)
             .addReg(riscv_common::k0)
             .addImm(rand);
-        llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(),
-                      TII_->get(llvm::RISCV::BNE))
+
+        insertErrorBB(std::string("RASM_ERR_BB_UNKNOWN"));
+        llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(), TII_->get(llvm::RISCV::BNE))
             .addReg(kRTS)
             .addReg(kC)
             .addMBB(cf_err_bb_);
@@ -317,15 +291,12 @@ void RISCVRasm::harden() {
         assert(MBB.succ_size() == 1);
         auto SBB{*std::begin(MBB.successors())};
 
-        assert(std::abs(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second -
-                        mbb_sigs_[&MBB].first) < 2045 &&
+        assert(std::abs(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second - mbb_sigs_[&MBB].first) < 2045 &&
                "large sig generated\n");
-        llvm::BuildMI(MBB, std::end(MBB), MI.getDebugLoc(),
-                      TII_->get(llvm::RISCV::ADDI))
+        llvm::BuildMI(MBB, std::end(MBB), MI.getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
             .addReg(kRTS)
             .addReg(kRTS)
-            .addImm(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second -
-                    mbb_sigs_[&MBB].first);
+            .addImm(mbb_sigs_[SBB].first + mbb_sigs_[SBB].second - mbb_sigs_[&MBB].first);
         break;
       }
     }
@@ -335,27 +306,35 @@ void RISCVRasm::harden() {
 // for now we just write '1' to special memory address (0xfff8) to tell the
 // simulator that this FI is covered in a separate error-BB. Further we
 // stay in this loop to avoid further functional execution
-void RISCVRasm::insertErrorBB() {
+llvm::MachineBasicBlock *RISCVRasm::insertErrorBB(std::string name) {
   cf_err_bb_ = MF_->CreateMachineBasicBlock();
   MF_->push_back(cf_err_bb_);
 
   auto DLL{MF_->front().front().getDebugLoc()};
 
+  if (not RISCV_COMMENT_CHAR.empty()) {
+    llvm::outs() << "COMPAS-RASM: Inserting error-BB: " << name << "\n";
+    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::INLINEASM))
+        .addExternalSymbol((RISCV_COMMENT_CHAR + name).c_str())
+        .addImm(0)
+        .addImm(0);
+  }
+
+  // // insert breakpoint instruction to stop execution
+  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::EBREAK));
+
   // storing '1' to addr = (0xfff8 = 0x10000 - 0x8):
   // lui t1, 16 -> makes t1 = 0x10000
-  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
-                TII_->get(llvm::RISCV::LUI))
+  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::LUI))
       .addReg(llvm::RISCV::X6)
       .addImm(16);
   // addi t2, zero, 1 -> makes t2 = 1
-  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
-                TII_->get(llvm::RISCV::ADDI))
+  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::ADDI))
       .addReg(llvm::RISCV::X7)
       .addReg(riscv_common::k0)
       .addImm(1);
   // sw t2, -8(t1) -> stores t2 to (t1 - 8) i.e. store 1 to 0xfff8
-  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
-                TII_->get(isa_config_.store_opcode))
+  llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(isa_config_.store_opcode))
       .addReg(llvm::RISCV::X7)
       .addReg(llvm::RISCV::X6)
       .addImm(-8);
@@ -368,13 +347,13 @@ void RISCVRasm::insertErrorBB() {
     // keep on repeating this errBB as we dont want to execute code now
     // J cf_err_bb_ = JALR X0, cf_err_bb_ because J is a pseudo-jump instr in
     // RISCV
-    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
-                  TII_->get(llvm::RISCV::JAL))
+    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::JAL))
         .addReg(riscv_common::k0)
         .addMBB(cf_err_bb_);
   } else {
     // quit early using ebreak
-    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
-                  TII_->get(llvm::RISCV::EBREAK));
+    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::EBREAK));
   }
+
+  return cf_err_bb_;
 }
