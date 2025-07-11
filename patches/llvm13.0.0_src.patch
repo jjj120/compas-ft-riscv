@@ -53,7 +53,7 @@ diff -ruN llvm/lib/Target/RISCV/CMakeLists.txt llvm_new/lib/Target/RISCV/CMakeLi
 diff -ruN llvm/lib/Target/RISCV/RISCV.h llvm_new/lib/Target/RISCV/RISCV.h
 --- llvm/lib/Target/RISCV/RISCV.h	2021-09-24 18:18:10.000000000 +0200
 +++ /home/ga38qoh/filer/llvm-project-13.0.0.src/llvm/lib/Target/RISCV/RISCV.h	2021-12-16 09:05:02.036830000 +0100
-@@ -15,8 +15,32 @@
+@@ -15,8 +15,34 @@
  #define LLVM_LIB_TARGET_RISCV_RISCV_H
  
  #include "MCTargetDesc/RISCVBaseInfo.h"
@@ -77,6 +77,8 @@ diff -ruN llvm/lib/Target/RISCV/RISCV.h llvm_new/lib/Target/RISCV/RISCV.h
 +    "FGS", desc("fine grain schedule for instr. DMR"), value_desc("pass")};
 +inline opt<bool> enable_repair{"REPAIR", desc("REPAIR pass on top of DMR"),
 +                               value_desc("pass")};
++inline opt<int> error_detection_strat{"ErrDet", desc("Error detection strategy"),
++                               value_desc("index")};
 +}  // namespace llvm::cl
 +
 +namespace riscv_common {

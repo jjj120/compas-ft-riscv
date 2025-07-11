@@ -53,7 +53,7 @@ private:
   void harden();
   // inserts an error-handler BB to the machine function so that in case of
   // error detection we end up in this block
-  llvm::MachineBasicBlock *insertErrorBB(std::string) override;
+  llvm::MachineBasicBlock *insertErrorBB(std::string, int) override;
   // utility function to test if a passed in MBB has both succ as fanin-nodes
   bool hasMultipleFaninSBB(llvm::MachineBasicBlock *);
 };

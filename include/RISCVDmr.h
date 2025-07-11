@@ -258,7 +258,7 @@ protected:
   // TODO: hide some of the following??
   llvm::MachineInstr *genShadowFromPrimary(const llvm::MachineInstr *) const;
   // virtual llvm::MachineBasicBlock *insertErrorBB();
-  virtual llvm::MachineBasicBlock *insertErrorBB(std::string err_bb_name);
+  virtual llvm::MachineBasicBlock *insertErrorBB(std::string, int);
   RegSetType getArgRegs(const llvm::MachineInstr *) const;
   RegSetType getRetRegs(const llvm::MachineInstr *) const;
   std::string getCalledFuncName(const llvm::MachineInstr *) const;

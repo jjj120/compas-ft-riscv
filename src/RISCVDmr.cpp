@@ -101,21 +101,11 @@ void RISCVDmr::protectGP() {
   for (auto &MBB : *MF_) {
     for (auto &MI : MBB) {
       if (MI.isReturn()) {
-        if (!RISCV_COMMENT_CHAR.empty()) {
-          llvm::outs() << "COMPAS: Inserting GP protection at return in " << fname_ << " with counter "
-                       << protectGP_counter << "\n";
-          llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(), TII_->get(llvm::RISCV::INLINEASM))
-              .addExternalSymbol((RISCV_COMMENT_CHAR + ("protect_gp_" + std::to_string(protectGP_counter))).c_str())
-              .addImm(0)
-              .addImm(0);
-        }
-
         llvm::BuildMI(MBB, MI.getIterator(), MI.getDebugLoc(), TII_->get(llvm::RISCV::BNE))
             .addReg(riscv_common::kGP)          // GP
             .addReg(P2S_.at(riscv_common::kGP)) // shadow GP
-            .addMBB(insertErrorBB(
-                "protect_gp_" +
-                std::to_string(protectGP_counter))); // branch to error-BB if GP and shadow GP are not equal
+            .addMBB(
+                insertErrorBB("protect_gp", protectGP_counter)); // branch to error-BB if GP and shadow GP are not equal
       }
     }
   }
@@ -126,6 +116,9 @@ void RISCVDmr::init() {
   TII_ = MF_->getSubtarget().getInstrInfo();
   MRI_ = &MF_->getRegInfo();
   config_.eds = riscv_common::ErrorDetectionStrategy::ED0; // default to ED0
+  llvm::outs() << "COMPAS: DMR: Error Detection Strategy: " << static_cast<int>(llvm::cl::error_detection_strat)
+               << "\n";
+  config_.eds = static_cast<riscv_common::ErrorDetectionStrategy>((int)llvm::cl::error_detection_strat);
 
   for (auto &s : llvm::codegen::getMAttrs()) {
     if (!s.compare(std::string{"+f"}) || !s.compare(std::string{"+d"})) {
@@ -405,17 +398,10 @@ void RISCVDmr::syncFPRegs(llvm::MachineBasicBlock *MBB, llvm::MachineBasicBlock:
 
   static int syncFPRegs_counter = {0};
   syncFPRegs_counter++;
-  if (!RISCV_COMMENT_CHAR.empty()) {
-    llvm::outs() << "COMPAS: Inserting syncFPRegs at " << fname_ << " with counter " << syncFPRegs_counter << "\n";
-    llvm::BuildMI(*MBB, insert, DLL, TII_->get(llvm::RISCV::INLINEASM))
-        .addExternalSymbol((RISCV_COMMENT_CHAR + ("syncFPRegs_" + std::to_string(syncFPRegs_counter))).c_str())
-        .addImm(0)
-        .addImm(0);
-  }
   llvm::BuildMI(*MBB, insert, DLL, TII_->get(llvm::RISCV::BNE))
       .addReg(shadow_zero)
       .addReg(riscv_common::k0)
-      .addMBB(insertErrorBB("syncFPRegs_" + std::to_string(syncFPRegs_counter)));
+      .addMBB(insertErrorBB("syncFPRegs", syncFPRegs_counter));
 }
 
 void RISCVDmr::protectStores() {
@@ -470,8 +456,8 @@ void RISCVDmr::protectStores() {
             auto mi_builder{llvm::BuildMI(*MBB, insert, DLL, TII_->get(llvm::RISCV::BNE))
                                 .addReg(data_reg)
                                 .addReg(P2S_.at(data_reg))
-                                .addMBB(insertErrorBB(
-                                    "UNKNOWN_ERROR_BB"))}; // TODO: Fix this, this does not generate a new error-BB
+                                .addMBB(insertErrorBB("UNKNOWN_ERROR_BB",
+                                                      -1))}; // TODO: Fix this, this does not generate a new error-BB
             loadbacks_.emplace(mi_builder.getInstr());
           } else {
             auto slli_imm{isa_config_.store_opcode == llvm::RISCV::SD ? 64 : 32};
@@ -496,19 +482,10 @@ void RISCVDmr::protectStores() {
 
 
             protectStores_counter++;
-            if (!RISCV_COMMENT_CHAR.empty()) {
-              llvm::outs() << "COMPAS: Inserting protectStores at " << fname_ << " with counter "
-                           << protectStores_counter << "\n";
-              llvm::BuildMI(*MBB, insert, DLL, TII_->get(llvm::RISCV::INLINEASM))
-                  .addExternalSymbol(
-                      (RISCV_COMMENT_CHAR + ("protectStores_" + std::to_string(protectStores_counter))).c_str())
-                  .addImm(0)
-                  .addImm(0);
-            }
             llvm::BuildMI(*MBB, insert, DLL, TII_->get(llvm::RISCV::BNE))
                 .addReg(shadow_zero)
                 .addReg(riscv_common::k0)
-                .addMBB(insertErrorBB("protectStores_" + std::to_string(protectStores_counter)));
+                .addMBB(insertErrorBB("protectStores", protectStores_counter));
           }
         }
       } else {
@@ -522,20 +499,10 @@ void RISCVDmr::protectStores() {
         if (op.isReg()) {
           if (riscv_common::getRegType(op.getReg()) == riscv_common::RegType::I) {
             protectStores_counter++;
-            if (!RISCV_COMMENT_CHAR.empty()) {
-              llvm::outs() << "COMPAS: Inserting protectStores at " << fname_ << " with counter "
-                           << protectStores_counter << "\n";
-              llvm::BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::INLINEASM))
-                  .addExternalSymbol(
-                      (RISCV_COMMENT_CHAR + ("protectStores_" + std::to_string(protectStores_counter))).c_str())
-                  .addImm(0)
-                  .addImm(0);
-            }
-
             llvm::BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
                 .addReg(op.getReg())
                 .addReg(P2S_.at(op.getReg()))
-                .addMBB(insertErrorBB("protectStores_" + std::to_string(protectStores_counter)));
+                .addMBB(insertErrorBB("protectStores", protectStores_counter));
           } else {
             syncFPRegs(MI->getParent(), MI->getIterator(), op.getReg(), P2S_.at(op.getReg()));
           }
@@ -547,20 +514,10 @@ void RISCVDmr::protectStores() {
       auto data_operand{MI->getOperand(0).getReg()};
       if (riscv_common::getRegType(data_operand) == riscv_common::RegType::I) {
         protectStores_counter++;
-        if (!RISCV_COMMENT_CHAR.empty()) {
-          llvm::outs() << "COMPAS: Inserting protectStores at " << fname_ << " with counter " << protectStores_counter
-                       << "\n";
-          llvm::BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::INLINEASM))
-              .addExternalSymbol(
-                  (RISCV_COMMENT_CHAR + ("protectStores_" + std::to_string(protectStores_counter))).c_str())
-              .addImm(0)
-              .addImm(0);
-        }
-
         llvm::BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
             .addReg(data_operand)
             .addReg(P2S_.at(data_operand))
-            .addMBB(insertErrorBB("protectStores_" + std::to_string(protectStores_counter)));
+            .addMBB(insertErrorBB("protectStores", protectStores_counter));
       } else {
         syncFPRegs(MI->getParent(), MI->getIterator(), data_operand, P2S_.at(data_operand));
       }
@@ -595,20 +552,10 @@ void RISCVDmr::protectLoads() {
         if (op.isReg()) {
           if (op.isUse()) {
             protectLoads_counter++;
-            if (!RISCV_COMMENT_CHAR.empty()) {
-              llvm::outs() << "COMPAS: Inserting protectLoads at " << fname_ << " with counter " << protectLoads_counter
-                           << "\n";
-              llvm::BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::INLINEASM))
-                  .addExternalSymbol(
-                      (RISCV_COMMENT_CHAR + ("protectLoads_" + std::to_string(protectLoads_counter))).c_str())
-                  .addImm(0)
-                  .addImm(0);
-            }
-
             llvm::BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
                 .addReg(op.getReg())
                 .addReg(P2S_.at(op.getReg()))
-                .addMBB(insertErrorBB("protectLoads_" + std::to_string(protectLoads_counter)));
+                .addMBB(insertErrorBB("protectLoads", protectLoads_counter));
           } else if (op.isDef()) {
             // inserting a move operation in order to do duplicate load
             moveIntoShadow(MI->getParent(), std::next(MI->getIterator()), op.getReg(), P2S_.at(op.getReg()));
@@ -837,20 +784,10 @@ void RISCVDmr::protectCalls() {
         for (auto &r : arg_regs) {
           if (riscv_common::getRegType(r) == riscv_common::RegType::I) {
             protectLibCalls_counter++;
-            if (!RISCV_COMMENT_CHAR.empty()) {
-              llvm::outs() << "COMPAS: Inserting protectLibCalls at " << fname_ << " with counter "
-                           << protectLibCalls_counter << "\n";
-              llvm::BuildMI(*MBB, MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::INLINEASM))
-                  .addExternalSymbol(
-                      (RISCV_COMMENT_CHAR + ("protectLibCalls_" + std::to_string(protectLibCalls_counter))).c_str())
-                  .addImm(0)
-                  .addImm(0);
-            }
-
             llvm::BuildMI(*MBB, MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
                 .addReg(r)
                 .addReg(P2S_.at(r))
-                .addMBB(insertErrorBB("protectLibCalls_" + std::to_string(protectLibCalls_counter)));
+                .addMBB(insertErrorBB("protectLibCalls", protectLibCalls_counter));
           } else {
             syncFPRegs(MI->getParent(), MI->getIterator(), r, P2S_.at(r));
           }
@@ -875,20 +812,10 @@ void RISCVDmr::protectCalls() {
         for (const auto &r : arg_regs) {
           if (riscv_common::getRegType(r) == riscv_common::RegType::I) {
             protectUserCalls_counter++;
-            if (!RISCV_COMMENT_CHAR.empty()) {
-              llvm::outs() << "COMPAS: Inserting protectUserCalls at " << fname_ << " with counter "
-                           << protectUserCalls_counter << "\n";
-              llvm::BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::INLINEASM))
-                  .addExternalSymbol(
-                      (RISCV_COMMENT_CHAR + ("protectUserCalls_" + std::to_string(protectUserCalls_counter))).c_str())
-                  .addImm(0)
-                  .addImm(0);
-            }
-
             llvm::BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
                 .addReg(r)
                 .addReg(P2S_.at(r))
-                .addMBB(insertErrorBB("protectUserCalls_" + std::to_string(protectUserCalls_counter)));
+                .addMBB(insertErrorBB("protectUserCalls", protectUserCalls_counter));
           } else {
             syncFPRegs(MI->getParent(), MI->getIterator(), r, P2S_.at(r));
           }
@@ -918,18 +845,10 @@ void RISCVDmr::protectCalls() {
         }
 
         protectUserCalls_counter++;
-        if (!RISCV_COMMENT_CHAR.empty()) {
-          llvm::BuildMI(entry_BB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::INLINEASM))
-              .addExternalSymbol(
-                  (RISCV_COMMENT_CHAR + ("protectUserCalls_" + std::to_string(protectUserCalls_counter))).c_str())
-              .addImm(0)
-              .addImm(0);
-        }
-
         llvm::BuildMI(entry_BB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
             .addReg(r)
             .addReg(P2S_.at(r))
-            .addMBB(insertErrorBB("protectUserCalls_" + std::to_string(protectUserCalls_counter)));
+            .addMBB(insertErrorBB("protectUserCalls", protectUserCalls_counter));
       }
 
       // TODO: compare FP reg files at start of func
@@ -1011,20 +930,10 @@ void RISCVDmr::protectCalls() {
       auto arg_regs{getArgRegs(MI)};
       for (auto &r : arg_regs) {
         protectUserCalls_counter++;
-        if (!RISCV_COMMENT_CHAR.empty()) {
-          llvm::outs() << "COMPAS: Inserting protectUserCalls at " << fname_ << " with counter "
-                       << protectUserCalls_counter << "\n";
-          llvm::BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::INLINEASM))
-              .addExternalSymbol(
-                  (RISCV_COMMENT_CHAR + ("protectUserCalls_" + std::to_string(protectUserCalls_counter))).c_str())
-              .addImm(0)
-              .addImm(0);
-        }
-
         llvm::BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
             .addReg(r)
             .addReg(P2S_.at(r))
-            .addMBB(insertErrorBB("protectUserCalls_" + std::to_string(protectUserCalls_counter)));
+            .addMBB(insertErrorBB("protectUserCalls", protectUserCalls_counter));
       }
 
       if (riscv_common::inCSString(llvm::cl::enable_eddi, fname_)) {
@@ -1069,19 +978,9 @@ void RISCVDmr::protectBranches() {
         insert++;
 
         protectBranches_counter++;
-        if (!RISCV_COMMENT_CHAR.empty()) {
-          llvm::outs() << "COMPAS: Inserting protectBranches at " << fname_ << " with counter "
-                       << protectBranches_counter << "\n";
-          llvm::BuildMI(*MI->getParent(), insert, MI->getDebugLoc(), TII_->get(llvm::RISCV::INLINEASM))
-              .addExternalSymbol(
-                  (RISCV_COMMENT_CHAR + ("protectBranches_" + std::to_string(protectBranches_counter))).c_str())
-              .addImm(0)
-              .addImm(0);
-        }
-
         llvm::BuildMI(*MI->getParent(), insert, MI->getDebugLoc(), TII_->get(llvm::RISCV::JAL))
             .addReg(riscv_common::k0)
-            .addMBB(insertErrorBB("protectBranches_" + std::to_string(protectBranches_counter)));
+            .addMBB(insertErrorBB("protectBranches", protectBranches_counter));
 
         // NOTE: due to nemesis it can happen that the original successor chain
         //       is being broken
@@ -1102,7 +1001,7 @@ void RISCVDmr::protectBranches() {
             o.setReg(P2S_.at(o.getReg()));
           }
         }
-        si->getOperand(2).setMBB(insertErrorBB("UNKNOWN_ERROR_BB"));
+        si->getOperand(2).setMBB(insertErrorBB("UNKNOWN_ERROR_BB", -1));
         MBB->insertAfter(MI, si);
 
         // taken path dup
@@ -1118,19 +1017,9 @@ void RISCVDmr::protectBranches() {
         nemesis_taken_BB->insert(nemesis_taken_BB->begin(), si);
 
         protectBranches_counter++;
-        if (!RISCV_COMMENT_CHAR.empty()) {
-          llvm::outs() << "COMPAS: Inserting protectBranches at " << fname_ << " with counter "
-                       << protectBranches_counter << "\n";
-          llvm::BuildMI(*MBB, std::next(MI->getIterator()), MI->getDebugLoc(), TII_->get(llvm::RISCV::INLINEASM))
-              .addExternalSymbol(
-                  (RISCV_COMMENT_CHAR + ("protectBranches_" + std::to_string(protectBranches_counter))).c_str())
-              .addImm(0)
-              .addImm(0);
-        }
-
         llvm::BuildMI(*nemesis_taken_BB, nemesis_taken_BB->end(), si->getDebugLoc(), TII_->get(llvm::RISCV::JAL))
             .addReg(riscv_common::k0)
-            .addMBB(insertErrorBB("protectBranches_" + std::to_string(protectBranches_counter)));
+            .addMBB(insertErrorBB("protectBranches", protectBranches_counter));
       } else {
         assert(0 && "what is this branch");
       }
@@ -1141,20 +1030,10 @@ void RISCVDmr::protectBranches() {
         for (const auto &op : MI->operands()) {
           if (op.isReg()) {
             protectBranches_counter++;
-            if (!RISCV_COMMENT_CHAR.empty()) {
-              llvm::outs() << "COMPAS: Inserting protectBranches at " << fname_ << " with counter "
-                           << protectBranches_counter << "\n";
-              llvm::BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::INLINEASM))
-                  .addExternalSymbol(
-                      (RISCV_COMMENT_CHAR + ("protectBranches_" + std::to_string(protectBranches_counter))).c_str())
-                  .addImm(0)
-                  .addImm(0);
-            }
-
             llvm::BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
                 .addReg(op.getReg())
                 .addReg(P2S_.at(op.getReg()))
-                .addMBB(insertErrorBB("protectBranches_" + std::to_string(protectBranches_counter)));
+                .addMBB(insertErrorBB("protectBranches", protectBranches_counter));
           }
         }
       }
@@ -1173,59 +1052,93 @@ void RISCVDmr::protectBranches() {
 // for now we just write '1' to special memory address (0xfff0) to tell the
 // simulator that this FI is covered in a separate error-BB. Further we
 // stay in this loop to avoid further functional execution
-llvm::MachineBasicBlock *RISCVDmr::insertErrorBB(std::string name) {
+llvm::MachineBasicBlock *RISCVDmr::insertErrorBB(std::string name, int counter) {
   llvm::MachineBasicBlock *err_bb_ = MF_->CreateMachineBasicBlock();
   err_bb_vec_.push_back(err_bb_);
   MF_->push_back(err_bb_);
 
   auto DLL{MF_->front().front().getDebugLoc()};
 
-  if (!RISCV_COMMENT_CHAR.empty()) {
-    llvm::outs() << "COMPAS-DMR: Inserting error-BB: " << name << "\n";
-    llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::INLINEASM))
-        .addExternalSymbol((RISCV_COMMENT_CHAR + ("Error_block_for_" + name)).c_str())
-        .addImm(0)
-        .addImm(0);
+
+  // ED0: on error-detection, jump to error-block and keep on executing it (0xFFF8)
+  // ED1: same as ED0 but it quits after notifying safety-unit (0xFFF8)
+  // ED2: on error-detection, call a function passing the specific checker's code
+  // ED3: on error-detection, jump to error block and immediately stop execution
+  // ED4: on error-detection, send pc to uart
+  switch (config_.eds) // error-detection strategy
+  {
+  case riscv_common::ErrorDetectionStrategy::ED0:
+    // storing '1' to addr : (0xfff8 = 0x10000 - 0x8):
+    // lui t1, 16 -> makes t1 = 0x10000
+    llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::LUI)).addReg(llvm::RISCV::X6).addImm(16);
+    // addi t2, zero, 1 -> makes t2 = 1
+    llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::ADDI))
+        .addReg(llvm::RISCV::X7)
+        .addReg(riscv_common::k0)
+        .addImm(1);
+    // sw t2, -8(t1) -> stores t2 to (t1 - 8) i.e. store 1 to 0xfff8
+    llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(isa_config_.store_opcode))
+        .addReg(llvm::RISCV::X7)
+        .addReg(llvm::RISCV::X6)
+        .addImm(-8);
+
+    // keep on repeating this errBB as we dont want to execute code now
+    // J err_bb_ = JALR X0, err_bb_ because J is a pseudo-jump instr in
+    // RISCV
+    llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::JAL))
+        .addReg(riscv_common::k0)
+        .addMBB(err_bb_);
+    break;
+
+  case riscv_common::ErrorDetectionStrategy::ED1:
+    // storing '1' to addr : (0xfff8 = 0x10000 - 0x8):
+    // lui t1, 16 -> makes t1 = 0x10000
+    llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::LUI)).addReg(llvm::RISCV::X6).addImm(16);
+    // addi t2, zero, 1 -> makes t2 = 1
+    llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::ADDI))
+        .addReg(llvm::RISCV::X7)
+        .addReg(riscv_common::k0)
+        .addImm(1);
+    // sw t2, -8(t1) -> stores t2 to (t1 - 8) i.e. store 1 to 0xfff8
+    llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(isa_config_.store_opcode))
+        .addReg(llvm::RISCV::X7)
+        .addReg(llvm::RISCV::X6)
+        .addImm(-8);
+
+    // quit immediately after notifying safety-unit
+    llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::EBREAK));
+    break;
+
+  case riscv_common::ErrorDetectionStrategy::ED2:
+    // assert(0 && "ED2 should not use error-BB");
+    break;
+
+  case riscv_common::ErrorDetectionStrategy::ED3:
+    llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::EBREAK));
+    break;
+
+  case riscv_common::ErrorDetectionStrategy::ED4:
+    assert(0 && "ED4 not implemented yet");
+    break;
+
+  default:
+    assert(0 && "Unknown error-detection strategy");
+    break;
   }
 
-  // // insert breakpoint instruction to stop execution
-  llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::EBREAK));
+  // llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::ANNOTATION_LABEL))
+  //     .addImm(0); // 0 is for no annotation type
+  // .addExternalSymbol(name.c_str(), llvm::MCSymbolRefExpr::VK_None)
+  // .addImm(counter)
 
-
-  // storing '1' to addr : (0xfff0 = 0x10000 - 0x10):
-  // lui t1, 16 -> makes t1 = 0x10000
-  llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::LUI)).addReg(llvm::RISCV::X6).addImm(16);
-  // addi t2, zero, 1 -> makes t2 = 1
-  llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::ADDI))
-      .addReg(llvm::RISCV::X7)
-      .addReg(riscv_common::k0)
-      .addImm(1);
-  // sw t2, -16(t1) -> stores t2 to (t1 - 8) i.e. store 1 to 0xfff0
-  llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(isa_config_.store_opcode))
-      .addReg(llvm::RISCV::X7)
-      .addReg(llvm::RISCV::X6)
-      .addImm(-16);
+  // llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::DBG_LABEL))
+  //     .addExternalSymbol(("dbg: " + name).c_str(), llvm::MCSymbolRefExpr::VK_None);
 
   // to encode the error-BB in order to make it a label so as to be able to
   // jump to it from anywhere in asm
   err_bb_->addSuccessor(err_bb_);
-  // // keep on repeating this errBB as we dont want to execute code now
-  // // J err_bb_ = JALR X0, err_bb_ because J is a pseudo-jump instr in RISCV
-  // llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL,
-  // TII_->get(llvm::RISCV::JAL))
-  //     .addReg(riscv_common::k0)
-  //     .addMBB(err_bb_);
 
-  if (config_.eds == riscv_common::ErrorDetectionStrategy::ED0) {
-    // keep on repeating this errBB as we dont want to execute code now
-    // J err_bb_ = JALR X0, err_bb_ because J is a pseudo-jump instr in RISCV
-    llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::JAL))
-        .addReg(riscv_common::k0)
-        .addMBB(err_bb_);
-  } else {
-    // quit early using ebreak
-    llvm::BuildMI(*err_bb_, std::end(*err_bb_), DLL, TII_->get(llvm::RISCV::EBREAK));
-  }
+  llvm::outs() << "CFCSS: created error-BB " << err_bb_->getFullName() << " for check " << name << "\n";
 
   return err_bb_;
 }
