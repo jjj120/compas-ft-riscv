@@ -19,6 +19,7 @@
 #include "RISCVSubtarget.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/LivePhysRegs.h"
 
 llvm::FunctionPass *llvm::createRISCVCfcss() { return new RISCVCfcss(); }
 
@@ -380,11 +381,15 @@ llvm::MachineBasicBlock *RISCVCfcss::insertErrorBB(std::string name, int counter
 
   auto DLL{MF_->front().front().getDebugLoc()};
 
-  // ED0: on error-detection, jump to error-block and keep on executing it (0xFFF8)
-  // ED1: same as ED0 but it quits after notifying safety-unit (0xFFF8)
-  // ED2: on error-detection, call a function passing the specific checker's code
-  // ED3: on error-detection, jump to error block and immediately stop execution
-  // ED4: on error-detection, send pc to uart
+  // ED0: on error-detection, jump to error-block and keep executing it
+  // ED1: same as ED0 but it quits after notifying safety-unit
+  // ED2: on error-detection, call a function passing the specific checker's
+  //      code
+  // ED3: on error-detection, invoke ecall with riscv-newlib codes: a7=SYS_exit=93
+  // see: https://github.com/riscv-collab/riscv-newlib/blob/master/libgloss/riscv/machine/syscall.h
+  // with error code in a0 indicating control flow error (-256) or dataflow error
+  // (-512) 
+  // ED4: on error-detection, jump to error block and immediately stop execution
   switch (config_.eds) // error-detection strategy
   {
   case riscv_common::ErrorDetectionStrategy::ED0:
@@ -438,11 +443,34 @@ llvm::MachineBasicBlock *RISCVCfcss::insertErrorBB(std::string name, int counter
     break;
 
   case riscv_common::ErrorDetectionStrategy::ED3:
-    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::EBREAK));
+        // storing '93' to a7, aka SYS_exit code ECALL code:
+    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
+                  TII_->get(llvm::RISCV::ADDI))
+        .addReg(llvm::RISCV::X17) // a7
+        .addReg(llvm::RISCV::X0)  // zero
+        .addImm(93);
+    // storing '-512' to a0, aka exit return value when ecall forces newlib sys
+    // exit:
+    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
+                  TII_->get(llvm::RISCV::ADDI))
+        .addReg(llvm::RISCV::X10) // a7
+        .addReg(llvm::RISCV::X0)  // zero
+        .addImm(-256);
+    // invoke 'ecall'
+    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
+                  TII_->get(llvm::RISCV::ECALL));
+  }
+
+  if (config_.eds == riscv_common::ErrorDetectionStrategy::ED0 ||
+      config_.eds == riscv_common::ErrorDetectionStrategy::ED3) {
+
+    // to encode the error-BB in order to make it a label so as to be able to
+    // jump to it from anywhere in asm
+    cf_err_bb_->addSuccessor(cf_err_bb_);
     break;
 
   case riscv_common::ErrorDetectionStrategy::ED4:
-    assert(0 && "ED4 not implemented yet");
+    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::EBREAK));
     break;
 
   default:

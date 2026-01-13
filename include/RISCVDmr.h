@@ -37,8 +37,22 @@ protected:
   // for convenience
   llvm::MachineFunction *MF_{nullptr};
   const llvm::TargetInstrInfo *TII_{nullptr};
+  const llvm::TargetRegisterInfo *TRI_{nullptr};
   const llvm::MachineRegisterInfo *MRI_{nullptr};
 
+  bool calls_dmr_user_func_{false};
+  bool calls_nondmr_user_func_{false};
+
+  // SH2: Infectous selective hardening (a DMR'ed function passes DMR onto its
+  // callees) // TBI SH1: Contained selective hardening and function call
+  // boundaries (a DMR'ed function does not pass DMR onto callees, non-DMR'ed
+  // callers prepare for DMR-callee) SH0: don't care
+  enum class SelectiveHardening { SH0, SH1, SH2 };
+  // SCC0: non-DMR calling non-DMR function -> standard
+  // SCC1: non-DMR calling DMR
+  // SCC2: DMR calling non-DMR
+  // SCC3: DMR calling DMR
+  enum class SelectiveCallingConvention { SCC0, SCC1, SCC2, SCC3 };
   // CGS: coarse grain scheduling of master and shadow instructions
   // FGS: fine grain scheduling of master and shadow instructions
   enum class InstructionSchedule { CGS, FGS };
@@ -65,12 +79,14 @@ protected:
   enum class ProtectStrategyLibCall { LC0, LC1, LC2 };
   // B1: check branch operands before branch (aka EDDI/SWIFT branch check)
   // B2: duplicate branch (aka NEMESIS)
-  // B0: dont protect
-  enum class ProtectStrategyBranch { B0, B1, B2 };
+  // B3: duplicate branch and force negative offsets to harden fallthroughs (aka
+  // COMPASEC) B0: dont protect
+  enum class ProtectStrategyBranch { B0, B1, B2, B3 };
   // TODO: maybe group all protect strategies into one concept
 
   // grouping above strategies/configs in a single container
   struct DMRConfig {
+    SelectiveHardening sh{SelectiveHardening::SH1};
     InstructionSchedule is{InstructionSchedule::CGS};
     ProtectStrategyStore pss{ProtectStrategyStore::S0};
     ProtectStrategyLoad psl{ProtectStrategyLoad::L0};
@@ -246,7 +262,10 @@ protected:
   bool use_shadow_for_stack_ops_{true};
   int frame_size_{0};
 
-  void init();
+  virtual void init();
+  void analyze_function();
+  void calc_framesize();
+  void updateSelectiveCalls();
   void duplicateInstructions();
   void protectStores();
   void protectLoads();
@@ -255,6 +274,7 @@ protected:
   void protectGP();
   void repair();
   bool ignoreMF();
+  bool is_func_dmr(const std::string &func_name);
   // TODO: hide some of the following??
   llvm::MachineInstr *genShadowFromPrimary(const llvm::MachineInstr *) const;
   // virtual llvm::MachineBasicBlock *insertErrorBB();

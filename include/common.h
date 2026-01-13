@@ -33,12 +33,16 @@ struct ISAConfig {
 // Reg Types
 enum class RegType { I, FS, FD, FH };
 
-// ED0: on error-detection, jump to error-block and keep on executing it
-// ED1: same as ED0 but it quits after notifying safety-unit (0xFFF8)
-// ED2: on error-detection, call a function passing the specific checker's code
-// ED3: on error-detection, jump to error block and immediately stop execution
-// ED4: on error-detection, send pc to uart
-enum class ErrorDetectionStrategy { ED0, ED1, ED2, ED3, ED4 };
+// ED0: on error-detection, jump to error-block and keep executing it
+// ED1: same as ED0 but it quits after notifying safety-unit
+// ED2: on error-detection, call a function passing the specific checker's
+//      code
+// ED3: on error-detection, invoke ecall with riscv-newlib codes: a7=SYS_exit=93
+// see: https://github.com/riscv-collab/riscv-newlib/blob/master/libgloss/riscv/machine/syscall.h
+// with error code in a0 indicating control flow error (-256) or dataflow error
+// (-512) 
+// ED4: on error-detection, jump to error block and immediately stop execution
+enum class ErrorDetectionStrategy { ED0, ED1, ED2, ED3, ED4 }; // TODO: these do not have a reasonable command line interface yet
 
 // for convenience:
 // zero register
