@@ -64,7 +64,7 @@ diff --git a/llvm/lib/Target/RISCV/RISCV.h b/llvm/lib/Target/RISCV/RISCV.h
 index ef1f97067e12..bf0e18c368ae 100644
 --- a/llvm/lib/Target/RISCV/RISCV.h
 +++ b/llvm/lib/Target/RISCV/RISCV.h
-@@ -16,6 +16,27 @@
+@@ -16,6 +16,29 @@
  
  #include "MCTargetDesc/RISCVBaseInfo.h"
  #include "llvm/Target/TargetMachine.h"
@@ -84,6 +84,8 @@ index ef1f97067e12..bf0e18c368ae 100644
 +    "FGS", desc("fine grain schedule for instr. DMR"), value_desc("pass")};
 +inline opt<bool> enable_repair{"REPAIR", desc("REPAIR pass on top of DMR"),
 +                               value_desc("pass")};
++inline opt<int> error_detection_strat{"ErrDet", desc("Error detection strategy"),
++                               value_desc("index")};
 +}  // namespace llvm::cl
 +
 +namespace riscv_common {

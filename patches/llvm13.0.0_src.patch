@@ -84,7 +84,9 @@ index ef1f97067e12..0aac1a535800 100644
 +    "FGS", desc("fine grain schedule for instr. DMR"), value_desc("pass")};
 +inline opt<bool> enable_repair{"REPAIR", desc("REPAIR pass on top of DMR"),
 +                               value_desc("pass")};
-+} // namespace llvm::cl
++inline opt<int> error_detection_strat{"ErrDet", desc("Error detection strategy"),
++                               value_desc("index")};
++}  // namespace llvm::cl
 +
 +namespace riscv_common {
 +bool inCSString(std::string, std::string);

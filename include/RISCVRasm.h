@@ -43,7 +43,7 @@ protected:
   // check register
   const unsigned kC{P2S_.at(kRTS)};
   // pointer to err-bb that is introdcued in this pass
-  llvm::MachineBasicBlock *cf_err_bb_{nullptr};
+  // llvm::MachineBasicBlock *cf_err_bb_{nullptr};
   // map each MBB to its signatures
   std::map<const llvm::MachineBasicBlock *, std::pair<short, short>>
       mbb_sigs_{};
@@ -59,7 +59,7 @@ protected:
   virtual void harden();
   // inserts an error-handler BB to the machine function so that in case of
   // error detection we end up in this block
-  void insertErrorBB() override;
+  llvm::MachineBasicBlock *insertErrorBB(std::string, int) override;
 
   virtual short calculate_adjustment(const llvm::MachineBasicBlock *source_bb,
                                      const llvm::MachineBasicBlock *target_bb);
