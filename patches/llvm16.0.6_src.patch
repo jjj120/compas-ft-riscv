@@ -1,7 +1,7 @@
-diff --git a/llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp b/llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp
+diff --git  llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp  llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp
 index 0b1e32c87fc3..6bb0b28cb37e 100644
---- a/llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp
-+++ b/llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp
+---  llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp
++++  llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp
 @@ -1065,18 +1065,26 @@ static void emitComments(const MachineInstr &MI, raw_ostream &CommentOS) {
    } else if ((Size = MI.getFoldedRestoreSize(TII))) {
      if (*Size) {
@@ -33,10 +33,10 @@ index 0b1e32c87fc3..6bb0b28cb37e 100644
      }
    }
  
-diff --git a/llvm/lib/Target/RISCV/CMakeLists.txt b/llvm/lib/Target/RISCV/CMakeLists.txt
+diff --git  llvm/lib/Target/RISCV/CMakeLists.txt  llvm/lib/Target/RISCV/CMakeLists.txt
 index f909e0017e2b..13115ba6926f 100644
---- a/llvm/lib/Target/RISCV/CMakeLists.txt
-+++ b/llvm/lib/Target/RISCV/CMakeLists.txt
+---  llvm/lib/Target/RISCV/CMakeLists.txt
++++  llvm/lib/Target/RISCV/CMakeLists.txt
 @@ -63,6 +63,9 @@ add_llvm_target(RISCVCodeGen
    TransformUtils
    GlobalISel
@@ -52,11 +52,11 @@ index f909e0017e2b..13115ba6926f 100644
  add_subdirectory(MCA)
  add_subdirectory(TargetInfo)
 +add_subdirectory(compas-ft-riscv)
-diff --git a/llvm/lib/Target/RISCV/RISCV.h b/llvm/lib/Target/RISCV/RISCV.h
+diff --git  llvm/lib/Target/RISCV/RISCV.h  llvm/lib/Target/RISCV/RISCV.h
 index c42fb070aade..3774102b9d06 100644
---- a/llvm/lib/Target/RISCV/RISCV.h
-+++ b/llvm/lib/Target/RISCV/RISCV.h
-@@ -15,8 +15,39 @@
+---  llvm/lib/Target/RISCV/RISCV.h
++++  llvm/lib/Target/RISCV/RISCV.h
+@@ -15,8 +15,41 @@
  #define LLVM_LIB_TARGET_RISCV_RISCV_H
  
  #include "MCTargetDesc/RISCVBaseInfo.h"
@@ -86,6 +86,8 @@ index c42fb070aade..3774102b9d06 100644
 +    "FGS", desc("fine grain schedule for instr. DMR"), value_desc("pass")};
 +inline opt<bool> enable_repair{"REPAIR", desc("REPAIR pass on top of DMR"),
 +                               value_desc("pass")};
++inline opt<int> error_detection_strat{"ErrDet", desc("Error detection strategy"),
++                               value_desc("index")};
 +} // namespace llvm::cl
 +
 +namespace riscv_common {
@@ -108,10 +110,10 @@ index c42fb070aade..3774102b9d06 100644
  } // namespace llvm
  
  #endif
-diff --git a/llvm/lib/Target/RISCV/RISCVRegisterInfo.cpp b/llvm/lib/Target/RISCV/RISCVRegisterInfo.cpp
+diff --git  llvm/lib/Target/RISCV/RISCVRegisterInfo.cpp  llvm/lib/Target/RISCV/RISCVRegisterInfo.cpp
 index 927845aa23d1..48ed8885734b 100644
---- a/llvm/lib/Target/RISCV/RISCVRegisterInfo.cpp
-+++ b/llvm/lib/Target/RISCV/RISCVRegisterInfo.cpp
+---  llvm/lib/Target/RISCV/RISCVRegisterInfo.cpp
++++  llvm/lib/Target/RISCV/RISCVRegisterInfo.cpp
 @@ -114,6 +114,103 @@ BitVector RISCVRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
    markSuperRegs(Reserved, RISCV::FRM);
    markSuperRegs(Reserved, RISCV::FFLAGS);
@@ -216,10 +218,10 @@ index 927845aa23d1..48ed8885734b 100644
    assert(checkAllSuperRegsMarked(Reserved));
    return Reserved;
  }
-diff --git a/llvm/lib/Target/RISCV/RISCVTargetMachine.cpp b/llvm/lib/Target/RISCV/RISCVTargetMachine.cpp
+diff --git  llvm/lib/Target/RISCV/RISCVTargetMachine.cpp  llvm/lib/Target/RISCV/RISCVTargetMachine.cpp
 index cc881406666c..b129e48cffe3 100644
---- a/llvm/lib/Target/RISCV/RISCVTargetMachine.cpp
-+++ b/llvm/lib/Target/RISCV/RISCVTargetMachine.cpp
+---  llvm/lib/Target/RISCV/RISCVTargetMachine.cpp
++++  llvm/lib/Target/RISCV/RISCVTargetMachine.cpp
 @@ -336,6 +336,11 @@ void RISCVPassConfig::addPreEmitPass2() {
    // possibility for other passes to break the requirements for forward
    // progress in the LR/SC block.

@@ -35,14 +35,14 @@ llvm::FunctionPass *llvm::createRISCVDmr() { return new RISCVDmr(); }
 RISCVDmr::RISCVDmr() : llvm::MachineFunctionPass{ID} {}
 
 bool RISCVDmr::ignoreMF() {
-  bool ignore{true};
+  bool ret{true};
 
   // NOTE: doesn't make sense to generalize below as we only expect
   //       upto 10 SIHFTs
 
   // is this function passed in NZDC list?
   if (riscv_common::inCSString(llvm::cl::enable_nzdc, fname_)) {
-    ignore = false;
+    ret = false;
   } else {
     if (llvm::cl::enable_nzdc.size()) {
       llvm::outs() << "COMPAS: Ignoring " << fname_ << " for NZDC\n";
@@ -66,7 +66,7 @@ bool RISCVDmr::ignoreMF() {
   }
   // is this function passed in SWIFT list?
   if (riscv_common::inCSString(llvm::cl::enable_swift, fname_)) {
-    ignore = false;
+    ret = false;
   } else {
     if (llvm::cl::enable_swift.size()) {
       llvm::outs() << "COMPAS: Ignoring " << fname_ << " for SWIFT\n";
@@ -74,14 +74,14 @@ bool RISCVDmr::ignoreMF() {
   }
   // is this function passed in EDDI list?
   if (riscv_common::inCSString(llvm::cl::enable_eddi, fname_)) {
-    ignore = false;
+    ret = false;
   } else {
     if (llvm::cl::enable_eddi.size()) {
       llvm::outs() << "COMPAS: Ignoring " << fname_ << " for EDDI\n";
     }
   }
 
-  return ignore;
+  return ret;
 }
 
 bool RISCVDmr::runOnMachineFunction(llvm::MachineFunction &MF) {
@@ -89,15 +89,14 @@ bool RISCVDmr::runOnMachineFunction(llvm::MachineFunction &MF) {
   MF_ = &MF;
   fname_ = std::string{MF_->getName()};
   auto add_errorBB_once = [&]() {
-    if (err_bb_ == nullptr) {
-      if (config_.eds == riscv_common::ErrorDetectionStrategy::ED0 ||
-          config_.eds == riscv_common::ErrorDetectionStrategy::ED1 ||
-          config_.eds == riscv_common::ErrorDetectionStrategy::ED3) {
-        // insert an error-BB in MF_
-        insertErrorBB();
-      } else {
-        assert(0 && "TODO");
-      }
+    if (config_.eds == riscv_common::ErrorDetectionStrategy::ED0 ||
+        config_.eds == riscv_common::ErrorDetectionStrategy::ED1 ||
+        config_.eds == riscv_common::ErrorDetectionStrategy::ED3 ||
+        config_.eds == riscv_common::ErrorDetectionStrategy::ED4) {
+      // insert an error-BB in MF_
+      // insertErrorBB();
+    } else {
+      assert(0 && "TODO");
     }
   };
   // if this function is not to be transformed then return early
@@ -519,11 +518,11 @@ void RISCVDmr::protectStores() {
           if (op.isReg()) {
             if (riscv_common::getRegType(op.getReg()) ==
                 riscv_common::RegType::I) {
-              llvm::BuildMI(*MI->getParent(), MI->getIterator(),
-                            MI->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
+              llvm::BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
                   .addReg(op.getReg())
                   .addReg(P2S_.at(op.getReg()))
-                  .addMBB(err_bb_);
+                  .addMBB(insertErrorBB("protectStores", protectStores_counter));
+              protectStores_counter++;
             } else {
               syncFPRegs(MI->getParent(), MI->getIterator(), op.getReg(),
                          P2S_.at(op.getReg()));
@@ -904,11 +903,10 @@ void RISCVDmr::updateSelectiveCalls() {
           for (const auto &regpair : P2S_) {
             if (riscv_common::getRegType(regpair.first) ==
                 riscv_common::RegType::I) {
-              llvm::BuildMI(*MBB, insert, MI->getDebugLoc(),
-                            TII_->get(llvm::RISCV::BNE))
+              llvm::BuildMI(*MBB, insert, MI->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
                   .addReg(regpair.first)
                   .addReg(regpair.second)
-                  .addMBB(err_bb_);
+                  .addMBB(insertErrorBB("UNKNOWN_ERROR_BB", -1));
             } else {
               // FIXME: only handle Base Integer Registers for now
             }
@@ -1395,7 +1393,8 @@ void RISCVDmr::protectBranches() {
         assert(MI->getOperand(2).isMBB() && "this branch is odd!");
         auto taken_BB{MI->getOperand(2).getMBB()};
 
-        if (err_bb_ == taken_BB) {
+
+        if (count(err_bb_vec_.begin(), err_bb_vec_.end(), taken_BB) > 0) {
           continue; // do not duplicate error existing dmr checks implemented
                     // with conditional branching
         }
@@ -1491,10 +1490,9 @@ void RISCVDmr::protectBranches() {
       if (MI->isUnconditionalBranch()) {
         llvm::MachineBasicBlock::iterator insert{MI->getIterator()};
         insert++;
-        llvm::BuildMI(*MI->getParent(), insert, MI->getDebugLoc(),
-                      TII_->get(llvm::RISCV::JAL))
+        llvm::BuildMI(*MI->getParent(), insert, MI->getDebugLoc(), TII_->get(llvm::RISCV::JAL))
             .addReg(riscv_common::k0)
-            .addMBB(err_bb_);
+            .addMBB(insertErrorBB("protectBranches", protectBranches_counter));
       } else if (MI->isConditionalBranch()) {
         auto MBB{MI->getParent()};
 
@@ -1504,12 +1502,11 @@ void RISCVDmr::protectBranches() {
         auto nottaken_BB{MBB->getFallThrough()};
         assert(nottaken_BB && "this branch has no fallthrough!");
 
-        llvm::BuildMI(*MBB, MBB->end(), MI->getDebugLoc(),
-                      TII_->get(llvm::RISCV::JAL))
+        llvm::BuildMI(*MBB, MBB->end(), MI->getDebugLoc(), TII_->get(llvm::RISCV::JAL))
             .addReg(riscv_common::k0)
-            .addMBB(
-                err_bb_); // push back an unconditional jump to error-BB to
-                          // protect previous unconditional jump to "not taken"
+            .addMBB(insertErrorBB("protectBranches",
+                                  protectBranches_counter)); // push back an unconditional jump to error-BB to
+                                                             // protect previous unconditional jump to "not taken"
 
         // fall-through path dup
         // this needs to be a new basic block and replaced with an unconditional
@@ -1530,7 +1527,7 @@ void RISCVDmr::protectBranches() {
         nemesec_nottaken_BB->addSuccessor(nottaken_BB);
         nemesis_bbs_.emplace(nemesec_nottaken_BB);
 
-        si->getOperand(2).setMBB(err_bb_);
+        si->getOperand(2).setMBB(insertErrorBB("protectBranches", protectBranches_counter));
         nemesec_nottaken_BB->push_back(si);
         llvm::MachineBasicBlock::iterator insert =
             nemesec_nottaken_BB->instr_end();
@@ -1556,10 +1553,9 @@ void RISCVDmr::protectBranches() {
         si->getOperand(2).setMBB(taken_BB);
         MI->getOperand(2).setMBB(nemesis_taken_BB);
         nemesis_taken_BB->insert(nemesis_taken_BB->begin(), si);
-        llvm::BuildMI(*nemesis_taken_BB, nemesis_taken_BB->end(),
-                      si->getDebugLoc(), TII_->get(llvm::RISCV::JAL))
+        llvm::BuildMI(*nemesis_taken_BB, nemesis_taken_BB->end(), si->getDebugLoc(), TII_->get(llvm::RISCV::JAL))
             .addReg(riscv_common::k0)
-            .addMBB(err_bb_);
+            .addMBB(insertErrorBB("protectBranches", protectBranches_counter));
       } else if (MI->isIndirectBranch()) {
         llvm::outs()
             << "\tWARNING: Branch protection not applicable. Is indirect MI:"
@@ -1785,26 +1781,10 @@ void RISCVDmr::repair() {
 
       RegMapType LiveP2S{MBB2Liveins[&MBB]};
 
-      auto getFreeShadowReg{[this,
-                             &LiveP2S](llvm::Register start_reg,
-                                       llvm::Register end_reg,
-                                       bool for_SP = false) -> llvm::Register {
-        std::default_random_engine gen{};
-        std::uniform_int_distribution<unsigned> unif_dist{start_reg, end_reg};
-
-        unsigned while_cnt{1000};
-        while (while_cnt) {
-          while_cnt--;
-
-          auto r{unif_dist(gen)};
-          // filtering primary regs
-          if (riscv_common::setmapContains(P2S_, r) ||
-              riscv_common::setmapContains(reserved_fp_primary_, r)) {
-            continue;
-          }
-          if (for_SP && !riscv_common::setmapContains(callee_saved_regs_, r)) {
-            continue;
-          }
+      auto getFreeShadowReg{
+          [this, &LiveP2S](llvm::Register start_reg, llvm::Register end_reg, bool for_SP = false) -> llvm::Register {
+            std::default_random_engine gen{};
+            std::uniform_int_distribution<unsigned> unif_dist{start_reg, end_reg};
 
             unsigned while_cnt{1000};
             while (while_cnt) {
@@ -2262,10 +2242,11 @@ void RISCVDmr::repair() {
                 .addImm(0);
           }
         } else {
+          auto mbb = MI.getOperand(2).getMBB();
           // sync checks
           if (MI.isConditionalBranch() && MI.getNumOperands() == 3 && MI.getOperand(2).isMBB() &&
               MI.getOperand(0).isReg() && MI.getOperand(1).isReg() &&
-              (std::find(err_bb_vec_.begin(), err_bb_vec_.end(), MI.getOperand(2).getMBB()) != err_bb_vec_.end())) {
+              (std::find(err_bb_vec_.begin(), err_bb_vec_.end(), mbb) != err_bb_vec_.end())) {
             auto first_reg{MI.getOperand(0).getReg()};
             auto second_reg{MI.getOperand(1).getReg()};
             if (first_reg != P2S_.at(riscv_common::k0) && riscv_common::mapValContains(P2S_, first_reg)) {

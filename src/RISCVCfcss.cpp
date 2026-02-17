@@ -18,8 +18,8 @@
 
 #include "RISCVSubtarget.h"
 #include "llvm/CodeGen/CommandFlags.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 
 llvm::FunctionPass *llvm::createRISCVCfcss() { return new RISCVCfcss(); }
 
@@ -85,7 +85,7 @@ void RISCVCfcss::init() {
     // nothing to initialize here
     break;
   case riscv_common::ErrorDetectionStrategy::ED4:
-    assert(0 && "TODO: ED4 not implemented yet");
+    // nothing to initialize here
     break;
 
   default:
@@ -127,13 +127,9 @@ void RISCVCfcss::init() {
       .addReg(riscv_common::k0)
       .addImm(mbb_info_[&MF_->front()].s);
 }
-
 // CFCSS hardening scheme
 void RISCVCfcss::harden() {
   // iterating over all MBBs in MF
-
-  std::set<llvm::MachineBasicBlock *> next_bbs_{};
-
   for (auto &MBB : *MF_) {
     // ignoring entryBB
     if (MBB.pred_empty()) {
@@ -147,11 +143,9 @@ void RISCVCfcss::harden() {
       continue;
     }
 
-    if (next_bbs_.find(&MBB) != next_bbs_.end()) {
-      // this MBB is one of the inserted next-BBs
+    if (std::find(err_bb_vec_.begin(), err_bb_vec_.end(), &MBB) != err_bb_vec_.end()) {
       continue;
     }
-
 
     auto insert{std::begin(MBB)};
     // G = G ^ d_j
@@ -169,74 +163,10 @@ void RISCVCfcss::harden() {
         .addReg(kD)
         .addReg(riscv_common::k0)
         .addImm(mbb_info_[&MBB].s);
-
-    if (config_.eds == riscv_common::ErrorDetectionStrategy::ED2) {
-      // in case of ED2 we have to call a function that
-      // handles the error, passing the signature of the block
-
-      // jump over the following instructions if there is no error
-      // the number of instructions to jump over is a little bit less than 20, but for that we insert NOPs at the end to
-      // be safe
-      llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::BEQ)).addReg(kG).addReg(kD).addImm(20);
-      // llvm::MachineBasicBlock *new_mbb = MF_->CreateMachineBasicBlock();
-
-      // llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::BEQ))
-      //     .addReg(kG)
-      //     .addReg(kD)
-      //     .addMBB(new_mbb);
-
-      // llvm::MachineFunction::iterator next_it;
-
-      // for (next_it = MF_->begin(); next_it != MF_->end(); ++next_it) {
-      //   if (next_it.getNodePtr() == &MBB) {
-      //     ++next_it;
-      //   }
-      // }
-
-      // llvm::MachineBasicBlock *next_mbb = &*next_it;
-
-      // llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::BEQ))
-      //     .addReg(kG)
-      //     .addReg(kD)
-      //     .addMBB(next_mbb);
-
-      // in case of error we call the error handler function
-      // the current pc is already in the ra register when calling the function
-
-      // call the error handler function
-      llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::PseudoCALL))
-          // .addReg(llvm::RISCV::X1) // ra register // TODO: maybe use a different register here?
-          .addExternalSymbol("cfc_error_handler");
-
-      // if the function returns, we want to stop execution (this should not happen,
-      // since the error handler should not return)
-      llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::EBREAK));
-
-      // insert some NOPs to jump into
-      for (size_t i = 0; i < 16; i++) {
-        llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::ADDI))
-            .addReg(riscv_common::k0) // NOP
-            .addReg(riscv_common::k0)
-            .addImm(0);
-      }
-
-      // add the new MBB to the function
-      // next_bbs_.insert(new_mbb);
-      // llvm::outs() << "hello1\n";
-      // MF_->push_back(new_mbb);
-      // llvm::outs() << "hello2\n";
-      // MF_->insert(MBB.getIterator(), new_mbb);
-      // llvm::outs() << "hello3\n";
-
-      // MBB.addSuccessor(new_mbb);
-      // new_mbb->addSuccessor(&MBB);
-    } else {
-      // in case of ED0, ED1, ED3 and ED4 we just jump to the error handle
-      llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
-          .addReg(kG)
-          .addReg(kD)
-          .addMBB(insertErrorBB(std::string("CFCSS_UNKNOWN_ERR_BB_NAME_1"), -1));
-    }
+    llvm::BuildMI(MBB, insert, insert->getDebugLoc(), TII_->get(llvm::RISCV::BNE))
+        .addReg(kG)
+        .addReg(kD)
+        .addMBB((insertErrorBB(std::string("CFCSS_UNKNOWN_ERR_BB_NAME_1"), -1)));
   }
 
   // special processing for fanin basicblocks
@@ -388,7 +318,7 @@ llvm::MachineBasicBlock *RISCVCfcss::insertErrorBB(std::string name, int counter
   // ED3: on error-detection, invoke ecall with riscv-newlib codes: a7=SYS_exit=93
   // see: https://github.com/riscv-collab/riscv-newlib/blob/master/libgloss/riscv/machine/syscall.h
   // with error code in a0 indicating control flow error (-256) or dataflow error
-  // (-512) 
+  // (-512)
   // ED4: on error-detection, jump to error block and immediately stop execution
   switch (config_.eds) // error-detection strategy
   {
@@ -415,6 +345,10 @@ llvm::MachineBasicBlock *RISCVCfcss::insertErrorBB(std::string name, int counter
     llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::JAL))
         .addReg(riscv_common::k0)
         .addMBB(cf_err_bb_);
+
+    // to encode the error-BB in order to make it a label so as to be able to
+    // jump to it from anywhere in asm
+    cf_err_bb_->addSuccessor(cf_err_bb_);
     break;
 
   case riscv_common::ErrorDetectionStrategy::ED1:
@@ -436,6 +370,10 @@ llvm::MachineBasicBlock *RISCVCfcss::insertErrorBB(std::string name, int counter
 
     // quit immediately after notifying safety-unit
     llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::EBREAK));
+
+    // to encode the error-BB in order to make it a label so as to be able to
+    // jump to it from anywhere in asm
+    cf_err_bb_->addSuccessor(cf_err_bb_);
     break;
 
   case riscv_common::ErrorDetectionStrategy::ED2:
@@ -443,7 +381,7 @@ llvm::MachineBasicBlock *RISCVCfcss::insertErrorBB(std::string name, int counter
     break;
 
   case riscv_common::ErrorDetectionStrategy::ED3:
-        // storing '93' to a7, aka SYS_exit code ECALL code:
+    // storing '93' to a7, aka SYS_exit code ECALL code:
     llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
                   TII_->get(llvm::RISCV::ADDI))
         .addReg(llvm::RISCV::X17) // a7
@@ -457,13 +395,7 @@ llvm::MachineBasicBlock *RISCVCfcss::insertErrorBB(std::string name, int counter
         .addReg(llvm::RISCV::X0)  // zero
         .addImm(-256);
     // invoke 'ecall'
-    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL,
-                  TII_->get(llvm::RISCV::ECALL));
-  }
-
-  if (config_.eds == riscv_common::ErrorDetectionStrategy::ED0 ||
-      config_.eds == riscv_common::ErrorDetectionStrategy::ED3) {
-
+    llvm::BuildMI(*cf_err_bb_, std::end(*cf_err_bb_), DLL, TII_->get(llvm::RISCV::ECALL));
     // to encode the error-BB in order to make it a label so as to be able to
     // jump to it from anywhere in asm
     cf_err_bb_->addSuccessor(cf_err_bb_);
